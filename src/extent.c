@@ -203,6 +203,37 @@ ecache_evict(tsdn_t *tsdn, pac_t *pac, ehooks_t *ehooks,
 		 */
 	}
 
+	#define COMPENSATION 0
+//    #define COMPENSATION (npages_min >> 4)
+	size_t ecache_npages = ecache_npages_get(ecache);
+	if (ecache_npages < npages_min) {
+		size_t edata_size = edata_size_get(edata);
+		size_t edata_npages = edata_size >> LG_PAGE;
+		if (npages_min - ecache_npages <= COMPENSATION) {
+			goto exit_split;
+		}
+		else
+		{
+			size_t npages_to_free = ecache_npages + edata_npages - npages_min + COMPENSATION;
+			size_t npages_to_keep = edata_npages - npages_to_free;
+			assert(npages_to_free > 0 && npages_to_keep > 0);
+
+			size_t size_to_free = npages_to_free << LG_PAGE;
+			size_t size_to_keep = npages_to_keep << LG_PAGE;
+
+			edata_t *edata_to_free = extent_split_wrapper(tsdn, pac, ehooks, edata,
+				size_to_keep, size_to_free, /* holding_core_locks*/ true);
+			if (edata_to_free == NULL) {
+				goto label_return;
+			}
+			edata_t *edata_to_keep = edata;
+			edata = edata_to_free;
+
+			eset_insert(&ecache->eset, edata_to_keep);
+		}
+	}
+
+exit_split:
 	/*
 	 * Either mark the extent active or deregister it to protect against
 	 * concurrent operations.
